@@ -211,7 +211,7 @@
 // Incolla qui sotto la configurazione del tuo progetto Firebase.
 // Se lasci vuoto, l'app continua a funzionare solo in locale (come prima).
 const firebaseConfig = {
-  apiKey: "",
+  apiKey: "AIzaSyDLX6DFcSfNM_ZIMIsap6C7GBrVA3JVcnU",
   authDomain: "doomsday-app-a6249.firebaseapp.com",
   databaseURL: "https://doomsday-app-a6249-default-rtdb.firebaseio.com",
   projectId: "doomsday-app-a6249",
@@ -388,8 +388,8 @@ function toISODate(d) {
 function getMeta(state) {
   const m = state._meta || {};
   return {
-    planStart: m.planStart || toISODate(CATCHUP_START),
     skipDays: Array.isArray(m.skipDays) ? m.skipDays : [],
+    schedule: m.schedule || null, // istantanea congelata: null finché non viene creata la prima volta
   };
 }
 function saveMeta(meta) {
@@ -397,22 +397,36 @@ function saveMeta(meta) {
   st._meta = meta;
   saveState(st);
 }
+function todayMidnight() {
+  const t = new Date(); t.setHours(0,0,0,0); return t;
+}
+// Se non esiste ancora un'istantanea salvata (primo avvio), la crea usando TUTTI i titoli
+// a partire dal 4 agosto 2026 — è il piano "originale". Da lì in poi si cambia solo premendo
+// il pulsante o modificando i giorni liberi.
+function ensureSchedule(state, plan) {
+  const meta = getMeta(state);
+  if (!meta.schedule) {
+    recalculateSchedule(CATCHUP_START); // crea e salva la prima istantanea
+    return getMeta(loadState());
+  }
+  return meta;
+}
 function recalcolaRitmo() {
-  const meta = getMeta(loadState());
-  meta.planStart = toISODate(new Date());
-  saveMeta(meta);
+  recalculateSchedule(todayMidnight());
   render();
 }
 function addSkipDay(isoDate) {
   const meta = getMeta(loadState());
   if (!meta.skipDays.includes(isoDate)) meta.skipDays.push(isoDate);
   saveMeta(meta);
+  recalculateSchedule(todayMidnight()); // un giorno libero nuovo deve riflettersi subito nel piano
   render();
 }
 function removeSkipDay(isoDate) {
   const meta = getMeta(loadState());
   meta.skipDays = meta.skipDays.filter(d => d !== isoDate);
   saveMeta(meta);
+  recalculateSchedule(todayMidnight());
   render();
 }
 
@@ -462,28 +476,49 @@ function buildAvailableDays(start, endExclusive, skipDaysSet) {
   return days;
 }
 
-// Calendario pesato per durata: usa SEMPRE l'elenco completo e fisso (inclusi i già visti)
-// per calcolare le posizioni, così spuntare qualcosa oggi non fa "scivolare" gli altri.
-function computeMainSchedule(mainQueue, mainQueueFull, fullOrderIndexMap, planStart, skipDaysSet, deadlineExclusive) {
-  const availableDays = buildAvailableDays(planStart, deadlineExclusive, skipDaysSet);
-  const totalMinutes = mainQueueFull.reduce((sum, it) => sum + (it.minutes || EPISODE_MIN), 0);
+// Costruisce una "istantanea" del calendario: assegna una data FISSA a ciascun titolo
+// della lista fornita, distribuendo la durata totale in modo equo sui giorni disponibili.
+// Il risultato viene SALVATO (in _meta.schedule) e resta congelato finché non si preme
+// "Ricalcola il ritmo" (o si aggiunge/rimuove un giorno libero): per questo il calendario
+// non "scivola" da solo spuntando un episodio, ma nemmeno resta congelato per sempre se
+// l'utente decide esplicitamente di redistribuire ciò che resta.
+function buildSnapshot(orderedItems, startDate, deadlineExclusive, skipDaysSet) {
+  const availableDays = buildAvailableDays(startDate, deadlineExclusive, skipDaysSet);
+  const totalMinutes = orderedItems.reduce((sum, it) => sum + (it.minutes || EPISODE_MIN), 0);
   const targetPerDay = availableDays.length > 0 ? totalMinutes / availableDays.length : totalMinutes;
-
-  // minuti cumulativi PRIMA di ciascun elemento, nella sequenza fissa completa
   let cum = 0;
-  const cumBefore = {};
-  mainQueueFull.forEach(it => {
-    cumBefore[it.id] = cum;
+  const assignments = {};
+  orderedItems.forEach((it) => {
+    let dayIdx = targetPerDay > 0 ? Math.floor(cum / targetPerDay) : 0;
+    if (dayIdx >= availableDays.length) dayIdx = Math.max(0, availableDays.length - 1);
+    if (dayIdx < 0) dayIdx = 0;
+    const date = availableDays.length > 0 ? availableDays[dayIdx] : startDate;
+    assignments[it.id] = toISODate(date);
     cum += (it.minutes || EPISODE_MIN);
   });
+  return { baseDate: toISODate(startDate), targetPerDay, assignments };
+}
 
+// Applica l'istantanea salvata alla coda attuale (aggiunge scheduledDate come oggetto Date)
+function applySnapshot(mainQueue, snapshot, fallbackDate) {
   return mainQueue.map((item) => {
-    let dayIdx = targetPerDay > 0 ? Math.floor(cumBefore[item.id] / targetPerDay) : 0;
-    if (dayIdx >= availableDays.length) dayIdx = availableDays.length - 1;
-    if (dayIdx < 0) dayIdx = 0;
-    const date = availableDays.length > 0 ? availableDays[dayIdx] : planStart;
+    const iso = snapshot.assignments[item.id];
+    const date = iso ? new Date(iso + "T00:00:00") : fallbackDate;
     return { ...item, scheduledDate: date };
   });
+}
+
+// Ricalcola davvero il piano: prende SOLO ciò che resta da vedere adesso e lo ridistribuisce
+// in modo equo tra "startDate" e la scadenza. Questa è l'unica funzione che cambia le date.
+function recalculateSchedule(startDate) {
+  const state = loadState();
+  const meta = getMeta(state);
+  const plan = buildPlan(state);
+  const blockScheduled = computeBlockSchedule(plan.block);
+  const deadline = blockScheduled.length ? blockScheduled[0].scheduledDate : DOOMSDAY;
+  const skipDaysSet = new Set(meta.skipDays);
+  meta.schedule = buildSnapshot(plan.mainQueue, startDate, deadline, skipDaysSet);
+  saveMeta(meta);
 }
 
 function computeBlockSchedule(block) {
@@ -500,22 +535,18 @@ function computeBlockSchedule(block) {
 
 function render() {
   const state = loadState();
-  const meta = getMeta(state);
   const plan = buildPlan(state);
+  const meta = ensureSchedule(state, plan); // crea l'istantanea di default al primissimo avvio
   const blockScheduled = computeBlockSchedule(plan.block);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const planStart = new Date(meta.planStart + "T00:00:00");
-  const anchor = today < planStart ? planStart : today;
+  const anchor = todayMidnight();
   const skipDaysSet = new Set(meta.skipDays);
   const blockStartDate = blockScheduled.length ? blockScheduled[0].scheduledDate : DOOMSDAY;
-  const mainScheduled = computeMainSchedule(plan.mainQueue, plan.mainQueueFull, plan.fullOrderIndexMap, anchor, skipDaysSet, blockStartDate);
+  const mainScheduled = applySnapshot(plan.mainQueue, meta.schedule, anchor);
 
   const totalLeft = plan.mainQueue.length + plan.X;
   document.getElementById("daysLeft").textContent = Math.max(1, Math.round((DOOMSDAY - anchor) / 86400000));
   document.getElementById("itemsLeft").textContent = totalLeft;
-  const totalMainMinutes = plan.mainQueue.reduce((s, it) => s + (it.minutes || EPISODE_MIN), 0);
-  const daysToBlockStart = Math.max(1, Math.round((blockStartDate - anchor) / 86400000));
-  const minutesPerDay = Math.round(totalMainMinutes / daysToBlockStart);
+  const minutesPerDay = Math.round(meta.schedule.targetPerDay || 0);
   document.getElementById("pace").textContent = totalLeft === 0 ? "sei in pari! 🎉" : ("~" + minutesPerDay + " min/g");
 
   // Avviso se il flusso principale rischia di sovrapporsi al blocco finale
@@ -538,7 +569,7 @@ function render() {
   ];
 
   const todayBox = document.getElementById("todayList");
-  const dueNow = allScheduled.filter(s => s.scheduledDate <= today);
+  const dueNow = allScheduled.filter(s => s.scheduledDate <= anchor);
   todayBox.innerHTML = "";
   if (dueNow.length === 0) {
     todayBox.innerHTML = '<div class="empty">Nessun episodio in scadenza — sei avanti col programma.</div>';
