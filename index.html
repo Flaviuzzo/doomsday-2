@@ -406,10 +406,23 @@ function todayMidnight() {
 function ensureSchedule(state, plan) {
   const meta = getMeta(state);
   if (!meta.schedule) {
-    recalculateSchedule(CATCHUP_START); // crea e salva la prima istantanea
+    // Primissima creazione: usa SEMPRE la lista completa (inclusi gli episodi già spuntati)
+    // ancorata al 4 agosto, così la posizione di ciascun titolo è fissa e assoluta —
+    // indipendente da quanti ne hai già visti. Se sei stato puntuale, il prossimo cade
+    // esattamente sul giorno giusto (non "oggi" per forza).
+    createInitialSnapshot(plan);
     return getMeta(loadState());
   }
   return meta;
+}
+function createInitialSnapshot(plan) {
+  const state = loadState();
+  const meta = getMeta(state);
+  const blockScheduled = computeBlockSchedule(plan.block);
+  const deadline = blockScheduled.length ? blockScheduled[0].scheduledDate : DOOMSDAY;
+  const skipDaysSet = new Set(meta.skipDays);
+  meta.schedule = buildSnapshot(plan.mainQueueFull, CATCHUP_START, deadline, skipDaysSet);
+  saveMeta(meta);
 }
 function recalcolaRitmo() {
   recalculateSchedule(todayMidnight());
