@@ -362,7 +362,12 @@ function saveState(state) {
   }
 }
 
-const DEFAULT_CHECKED_IDS = ["sm-bnd"]; // Brand New Day: lo vedi lunedì, prima dell'inizio del piano martedì
+const DEFAULT_CHECKED_IDS = [
+  "sm-bnd", // Brand New Day: lo vedi lunedì, prima dell'inizio del piano martedì
+  "whatif-1-e1", "whatif-1-e2", "whatif-1-e3", "whatif-1-e4", "whatif-1-e5", "whatif-1-e6", "whatif-1-e7", "whatif-1-e8", "whatif-1-e9", // What If...? Stagione 1 completa
+  "zombies-e1", "zombies-e2", "zombies-e3", "zombies-e4", // Marvel Zombies completa
+  "wandavision-e1", "wandavision-e2", "wandavision-e3", "wandavision-e4", "wandavision-e5", "wandavision-e6", "wandavision-e7", "wandavision-e8", "wandavision-e9", // WandaVision completa
+];
 
 function isChecked(state, item) {
   if (state[item.id] !== undefined) return !!state[item.id];
