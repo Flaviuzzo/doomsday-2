@@ -211,15 +211,15 @@
 // Incolla qui sotto la configurazione del tuo progetto Firebase.
 // Se lasci vuoto, l'app continua a funzionare solo in locale (come prima).
 const firebaseConfig = {
-  apiKey: "AIzaSyDLX6DFcSfNM_ZIMIsap6C7GBrVA3JVcnU",
-  authDomain: "doomsday-app-a6249.firebaseapp.com",
-  databaseURL: "https://doomsday-app-a6249-default-rtdb.firebaseio.com",
-  projectId: "doomsday-app-a6249",
-  storageBucket: "doomsday-app-a6249.firebasestorage.app",
-  messagingSenderId: "792866930491",
-  appId: "1:792866930491:web:927595e39dfb24fe7c811e"
+  apiKey: "AIzaSyD6WWqLDlQCJTNXmCgq46jkJiV4DPaBfWY",
+  authDomain: "doomsday-2-b5fa1.firebaseapp.com",
+  databaseURL: "https://doomsday-2-b5fa1-default-rtdb.firebaseio.com",
+  projectId: "doomsday-2-b5fa1",
+  storageBucket: "doomsday-2-b5fa1.firebasestorage.app",
+  messagingSenderId: "223329511406",
+  appId: "1:223329511406:web:f571eae12cf3cbc35310ff"
 };
-const SYNC_PATH = "030bb92acd62731b9250a6892bebb30c/state";
+const SYNC_PATH = "a8ebaee38a7b342d4011102a994f2aa0/state"; // percorso SEPARATO — app di prova, dati indipendenti dalla live
 
 let syncDb = null;
 function setSyncStatus(text, color) {
@@ -362,17 +362,6 @@ function saveState(state) {
   }
 }
 
-if (syncDb) {
-  syncDb.ref(SYNC_PATH).on("value", (snapshot) => {
-    const remote = snapshot.val() || {};
-    const current = JSON.stringify(loadState());
-    const incoming = JSON.stringify(remote);
-    if (current !== incoming) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
-      render();
-    }
-  });
-}
 const DEFAULT_CHECKED_IDS = ["sm-bnd"]; // Brand New Day: lo vedi lunedì, prima dell'inizio del piano martedì
 
 function isChecked(state, item) {
@@ -863,7 +852,38 @@ function resetPlan() {
   }
 }
 
-render();
+// Avvio sicuro: se la sincronizzazione è attiva, aspetta di ricevere i dati VERI dal
+// server prima di disegnare la pagina (e quindi prima che qualunque salvataggio automatico
+// possa scrivere per sbaglio una lista vuota sopra ai dati già sincronizzati).
+function startApp() {
+  if (syncDb) {
+    syncDb.ref(SYNC_PATH).once("value")
+      .then((snapshot) => {
+        const remote = snapshot.val();
+        if (remote && Object.keys(remote).length > 0) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+        }
+        render();
+        attachLiveSync();
+      })
+      .catch(() => { render(); attachLiveSync(); });
+  } else {
+    render();
+  }
+}
+function attachLiveSync() {
+  syncDb.ref(SYNC_PATH).on("value", (snapshot) => {
+    const remote = snapshot.val() || {};
+    const current = JSON.stringify(loadState());
+    const incoming = JSON.stringify(remote);
+    if (current !== incoming) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+      render();
+    }
+  });
+}
+
+startApp();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
